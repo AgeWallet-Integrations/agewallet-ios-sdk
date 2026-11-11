@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# A newer run on the same branch or pull request cancels the older one.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: macOS (swift test)
+    # Runs on the organisation repo only, never on personal forks.
+    if: github.repository == 'AgeWallet-Integrations/agewallet-ios-sdk'
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Select Xcode 26.6
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app
+          xcodebuild -version
+          swift --version
+
+      - name: Test with coverage
+        run: swift test --enable-code-coverage
+
+      # Line coverage of the files in Sources/, from the llvm-cov JSON that swift test writes,
+      # added to the run summary
+      - name: Coverage summary
+        run: |
+          jq -r '
+            [.data[0].files[] | select(.filename | test("/Sources/")) | .summary.lines] as $f
+            | ($f | map(.covered) | add) as $hit
+            | ($f | map(.count) | add) as $all
+            | "### Line coverage\n\n\($hit) of \($all) lines in Sources/ (\(($hit * 1000 / $all | round) / 10)%), \($f | length) files"
+          ' "$(swift test --show-codecov-path)" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  ios:
+    name: iOS simulator (xcodebuild test)
+    if: github.repository == 'AgeWallet-Integrations/agewallet-ios-sdk'
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Select Xcode 26.6
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app
+          xcodebuild -version
+
+      - name: List schemes
+        run: xcodebuild -list
+
+      - name: Test on iPhone 17 (iOS 26.5)
+        run: |
+          xcodebuild test \
+            -scheme AgeWalletSDK \
+            -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5'
+
+  # One check for the main ruleset to require: passes only when both jobs passed.
+  tests:
+    name: Tests
+    if: always() && github.repository == 'AgeWallet-Integrations/agewallet-ios-sdk'
+    needs: [macos, ios]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: macOS and iOS jobs passed
+        run: test "${{ needs.macos.result }}" = "success" && test "${{ needs.ios.result }}" = "success"

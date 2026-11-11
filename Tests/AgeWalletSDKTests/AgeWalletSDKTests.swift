@@ -1,7 +1,7 @@
 import XCTest
 @testable import AgeWalletSDK
 
-final class AgeWalletSDKTests: XCTestCase {
+final class AgeWalletSDKTests: NetworkBlockedTestCase {
     func testSecurityGeneratesVerifier() {
         let verifier = Security.generateVerifier()
         XCTAssertFalse(verifier.isEmpty)
